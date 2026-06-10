@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -57,7 +55,7 @@ class WorktreeExistsError(WorktreeError):
 
 def run_git_command(
     args: list[str],
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
     capture: bool = True,
 ) -> subprocess.CompletedProcess:
     """Run a git command and return the result."""
@@ -75,7 +73,7 @@ def run_git_command(
         raise WorktreeError("Git not found in PATH") from e
 
 
-def get_repo_root(cwd: Optional[Path] = None) -> Path:
+def get_repo_root(cwd: Path | None = None) -> Path:
     """Get the git repository root directory."""
     result = run_git_command(["rev-parse", "--show-toplevel"], cwd=cwd)
     if result.returncode != 0:
@@ -83,13 +81,13 @@ def get_repo_root(cwd: Optional[Path] = None) -> Path:
     return Path(result.stdout.strip())
 
 
-def is_bare_repo(cwd: Optional[Path] = None) -> bool:
+def is_bare_repo(cwd: Path | None = None) -> bool:
     """Check if the repository is bare."""
     result = run_git_command(["rev-parse", "--is-bare-repository"], cwd=cwd)
     return result.stdout.strip() == "true"
 
 
-def list_worktrees(cwd: Optional[Path] = None) -> list[Worktree]:
+def list_worktrees(cwd: Path | None = None) -> list[Worktree]:
     """List all worktrees in the repository."""
     repo_root = get_repo_root(cwd)
     bare = is_bare_repo(cwd)
@@ -163,9 +161,9 @@ def _parse_worktree(data: dict, repo_root: Path, bare: bool) -> Worktree:
 def create_worktree(
     path: Path,
     branch: str,
-    base: Optional[str] = None,
+    base: str | None = None,
     force: bool = False,
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> Worktree:
     """Create a new worktree."""
     repo_root = get_repo_root(cwd)
@@ -203,7 +201,7 @@ def create_worktree(
 def remove_worktree(
     path: Path,
     force: bool = False,
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
 ) -> None:
     """Remove a worktree."""
     repo_root = get_repo_root(cwd)
@@ -221,7 +219,7 @@ def remove_worktree(
         raise WorktreeError(f"Failed to remove worktree: {stderr}")
 
 
-def lock_worktree(path: Path, reason: Optional[str] = None, cwd: Optional[Path] = None) -> None:
+def lock_worktree(path: Path, reason: str | None = None, cwd: Path | None = None) -> None:
     """Lock a worktree to prevent pruning."""
     repo_root = get_repo_root(cwd)
 
@@ -235,7 +233,7 @@ def lock_worktree(path: Path, reason: Optional[str] = None, cwd: Optional[Path] 
         raise WorktreeError(f"Failed to lock worktree: {result.stderr.strip()}")
 
 
-def unlock_worktree(path: Path, cwd: Optional[Path] = None) -> None:
+def unlock_worktree(path: Path, cwd: Path | None = None) -> None:
     """Unlock a worktree."""
     repo_root = get_repo_root(cwd)
 
@@ -244,7 +242,7 @@ def unlock_worktree(path: Path, cwd: Optional[Path] = None) -> None:
         raise WorktreeError(f"Failed to unlock worktree: {result.stderr.strip()}")
 
 
-def prune_worktrees(cwd: Optional[Path] = None, dry_run: bool = False) -> list[Path]:
+def prune_worktrees(cwd: Path | None = None, dry_run: bool = False) -> list[Path]:
     """Prune worktree administrative files."""
     repo_root = get_repo_root(cwd)
 
@@ -270,7 +268,7 @@ def prune_worktrees(cwd: Optional[Path] = None, dry_run: bool = False) -> list[P
     return pruned
 
 
-def get_current_worktree(cwd: Optional[Path] = None) -> Worktree:
+def get_current_worktree(cwd: Path | None = None) -> Worktree:
     """Get the worktree for the current directory."""
     repo_root = get_repo_root(cwd)
     worktrees = list_worktrees(repo_root)

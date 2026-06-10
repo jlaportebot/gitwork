@@ -12,16 +12,16 @@ from rich.table import Table
 from gitwork import (
     Worktree,
     WorktreeError,
-    WorktreeNotFoundError,
     WorktreeExistsError,
-    list_worktrees,
+    WorktreeNotFoundError,
     create_worktree,
-    remove_worktree,
-    lock_worktree,
-    unlock_worktree,
-    prune_worktrees,
     get_current_worktree,
     get_repo_root,
+    list_worktrees,
+    lock_worktree,
+    prune_worktrees,
+    remove_worktree,
+    unlock_worktree,
 )
 
 console = Console()
@@ -29,11 +29,11 @@ console = Console()
 
 def handle_error(e: Exception) -> int:
     """Handle and display errors consistently."""
-    if isinstance(e, WorktreeNotFoundError):
-        console.print(f"[red]Error:[/red] {e}")
-    elif isinstance(e, WorktreeExistsError):
-        console.print(f"[red]Error:[/red] {e}")
-    elif isinstance(e, WorktreeError):
+    if (
+        isinstance(e, WorktreeNotFoundError)
+        or isinstance(e, WorktreeExistsError)
+        or isinstance(e, WorktreeError)
+    ):
         console.print(f"[red]Error:[/red] {e}")
     else:
         console.print(f"[red]Unexpected error:[/red] {e}")
@@ -201,7 +201,7 @@ def current(ctx: click.Context) -> None:
         console.print(f"  Branch: {fmt['branch']}")
         console.print(f"  Commit: {fmt['commit']}")
         console.print(f"  Path: {fmt['path']}")
-        if fmt['status']:
+        if fmt["status"]:
             console.print(f"  Status: {fmt['status']}")
     except WorktreeError as e:
         ctx.exit(handle_error(e))
