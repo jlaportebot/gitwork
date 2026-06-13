@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+gitwork/__init__.py
+gitwork/__main__.py
+gitwork/cli.py
+gitwork/core.py
+gitwork.egg-info/PKG-INFO
+gitwork.egg-info/SOURCES.txt
+gitwork.egg-info/dependency_links.txt
+gitwork.egg-info/entry_points.txt
+gitwork.egg-info/requires.txt
+gitwork.egg-info/top_level.txt
+tests/test_cli.py
+tests/test_core.py

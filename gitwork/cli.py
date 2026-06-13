@@ -125,7 +125,7 @@ def create(ctx: click.Context, branch: str, path: Path, base: str | None, force:
     if path.exists() and path.is_file():
         console.print(f"[red]Error:[/red] Path '{path}' exists as a file")
         ctx.exit(1)
-    
+
     try:
         wt = create_worktree(path=path, branch=branch, base=base, force=force)
         console.print(f"[green]Created worktree:[/green] {wt.name} at {wt.path}")

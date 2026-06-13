@@ -1,0 +1,64 @@
+Metadata-Version: 2.4
+Name: gitwork
+Version: 0.1.0
+Summary: CLI tool for managing git worktrees with ease
+Author-email: John Laporte <laportej17@gmail.com>
+License: MIT
+Project-URL: Homepage, https://github.com/jlaportebot/gitwork
+Project-URL: Repository, https://github.com/jlaportebot/gitwork
+Project-URL: Issues, https://github.com/jlaportebot/gitwork/issues
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: click>=8.1.0
+Requires-Dist: rich>=13.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: ruff>=0.4.0; extra == "dev"
+Requires-Dist: mypy>=1.9.0; extra == "dev"
+Requires-Dist: pre-commit>=3.6.0; extra == "dev"
+
+# gitwork
+
+CLI tool for managing git worktrees with ease.
+
+## Features
+
+- Create, list, and remove git worktrees
+- Automatic branch tracking
+- Integrated with GitHub CLI
+
+## Installation
+
+```bash
+pip install gitwork
+```
+
+## Usage
+
+```bash
+gitwork create <branch-name>
+gitwork list
+gitwork remove <worktree-path>
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check .
+ruff format --check .
+```
+
+## License
+
+MIT
