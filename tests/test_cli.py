@@ -90,10 +90,12 @@ class TestCLIIntegration:
         assert result.exit_code in (0, 1, 2)
 
     def test_create_invalid_path(self, tmp_path: Path) -> None:
-        """Test create command with invalid path (parent directory doesn't exist)."""
+        """Test create command with invalid path (existing file)."""
         runner = CliRunner()
-        # CLI expects: branch, path - test passes path where parent doesn't exist
-        result = runner.invoke(main, ["create", "new-branch", "nonexistent/path"])
+        # Create a file at the path - git worktree add will fail if path exists as a file
+        existing_file = tmp_path / "existing_file"
+        existing_file.write_text("content")
+        result = runner.invoke(main, ["create", str(existing_file), "new-branch"])
         # Should fail gracefully
         assert result.exit_code != 0 or "Error" in result.output or "error" in result.output.lower()
 
