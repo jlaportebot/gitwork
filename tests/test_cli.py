@@ -90,9 +90,10 @@ class TestCLIIntegration:
         assert result.exit_code in (0, 1, 2)
 
     def test_create_invalid_path(self, tmp_path: Path) -> None:
-        """Test create command with invalid path."""
+        """Test create command with invalid path (parent directory doesn't exist)."""
         runner = CliRunner()
-        result = runner.invoke(main, ["create", "nonexistent/path", "new-branch"])
+        # CLI expects: branch, path - test passes path where parent doesn't exist
+        result = runner.invoke(main, ["create", "new-branch", "nonexistent/path"])
         # Should fail gracefully
         assert result.exit_code != 0 or "Error" in result.output or "error" in result.output.lower()
 
