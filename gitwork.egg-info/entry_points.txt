@@ -1,2 +1,0 @@
-[console_scripts]
-gitwork = gitwork.cli:main
