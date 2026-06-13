@@ -75,9 +75,18 @@ def run_git_command(
 
 def get_repo_root(cwd: Path | None = None) -> Path:
     """Get the git repository root directory."""
+    # For bare repos, use --git-dir
     result = run_git_command(["rev-parse", "--show-toplevel"], cwd=cwd)
     if result.returncode != 0:
-        raise WorktreeError(f"Not a git repository: {result.stderr.strip()}")
+        # Try bare repo approach
+        result = run_git_command(["rev-parse", "--git-dir"], cwd=cwd)
+        if result.returncode != 0:
+            raise WorktreeError(f"Not a git repository: {result.stderr.strip()}")
+        # For bare repo, the git dir is the repo root
+        git_dir = Path(result.stdout.strip())
+        if not git_dir.is_absolute():
+            git_dir = (cwd or Path()).resolve() / git_dir
+        return git_dir
     return Path(result.stdout.strip())
 
 
@@ -139,7 +148,8 @@ def _parse_worktree(data: dict, repo_root: Path, bare: bool) -> Worktree:
     is_prunable = data.get("prunable", False)
 
     # Determine if this is the main worktree
-    is_main = path == repo_root and not is_bare
+    # For bare repos, the first (and only) worktree is the main one
+    is_main = (path == repo_root and not is_bare) or (bare and path == repo_root)
 
     # Clean up branch name (remove refs/heads/ prefix)
     if branch.startswith("refs/heads/"):
@@ -171,10 +181,16 @@ def create_worktree(
     args = ["worktree", "add"]
     if force:
         args.append("--force")
+    # Use -b to create a new branch, unless force is used with existing branch
+    if not force:
+        args.extend(["-b", branch])
     if base:
-        args.extend(["-b", branch, base])
+        args.extend([str(path), base])
     else:
-        args.extend([str(path), branch])
+        args.append(str(path))
+        if force:
+            # When forcing without base, attach to existing branch
+            args.append(branch)
 
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
@@ -185,8 +201,13 @@ def create_worktree(
 
     # Get the created worktree info
     worktrees = list_worktrees(repo_root)
+    # First try to find by path (most reliable)
     for wt in worktrees:
-        if wt.path == path.resolve() or wt.branch == branch:
+        if wt.path == path.resolve():
+            return wt
+    # Fallback to branch match
+    for wt in worktrees:
+        if wt.branch == branch:
             return wt
 
     # Fallback
@@ -214,7 +235,7 @@ def remove_worktree(
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if "not found" in stderr or "no such worktree" in stderr:
+        if "not found" in stderr or "no such worktree" in stderr or "not a working tree" in stderr:
             raise WorktreeNotFoundError(f"Worktree not found: {path}")
         raise WorktreeError(f"Failed to remove worktree: {stderr}")
 
