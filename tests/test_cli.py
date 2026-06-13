@@ -92,12 +92,14 @@ class TestCLIIntegration:
     def test_create_invalid_path(self, tmp_path: Path) -> None:
         """Test create command with invalid path (existing file)."""
         runner = CliRunner()
-        # Create a file at the path - git worktree add will fail if path exists as a file
+        # Create a file at the path - CLI should reject paths that exist as files
         existing_file = tmp_path / "existing_file"
         existing_file.write_text("content")
-        result = runner.invoke(main, ["create", str(existing_file), "new-branch"])
-        # Should fail gracefully
-        assert result.exit_code != 0 or "Error" in result.output or "error" in result.output.lower()
+        # Correct argument order: branch first, then path
+        result = runner.invoke(main, ["create", "new-branch", str(existing_file)])
+        # Should fail gracefully - path exists as a file
+        assert result.exit_code != 0
+        assert "Error" in result.output or "error" in result.output.lower()
 
     def test_cli_with_explicit_repo(self, git_repo: Path) -> None:
         """Test CLI commands with explicit repo path."""
