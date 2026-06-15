@@ -259,9 +259,7 @@ def pr_list(ctx: click.Context, state: str, limit: int, porcelain: bool) -> None
 
     for pr_item in prs:
         draft_str = "✓" if pr_item.is_draft else ""
-        state_style = {"open": "green", "closed": "red", "merged": "purple"}.get(
-            pr_item.state, ""
-        )
+        state_style = {"open": "green", "closed": "red", "merged": "purple"}.get(pr_item.state, "")
         if state_style:
             state_display = f"[{state_style}]{pr_item.state}[/{state_style}]"
         else:

@@ -321,11 +321,7 @@ def remove_worktree(
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if (
-            "not found" in stderr
-            or "no such worktree" in stderr
-            or "not a working tree" in stderr
-        ):
+        if "not found" in stderr or "no such worktree" in stderr or "not a working tree" in stderr:
             raise WorktreeNotFoundError(path)
         raise RemoveWorktreeError(stderr)
 

@@ -132,9 +132,7 @@ class TestGetRepoInfo:
             get_repo_info(tmp_path)
 
     @patch("gitwork.github.get_repo_root")
-    def test_get_repo_info_not_git_repo(
-        self, mock_get_repo_root: Mock, tmp_path: Path
-    ) -> None:
+    def test_get_repo_info_not_git_repo(self, mock_get_repo_root: Mock, tmp_path: Path) -> None:
         """Test error when not in a git repo."""
         mock_get_repo_root.side_effect = WorktreeError("Not a git repository")
 
