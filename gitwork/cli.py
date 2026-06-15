@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
 from gitwork import (
+    GitHubError,
     Worktree,
     WorktreeError,
     WorktreeExistsError,
     WorktreeNotFoundError,
+    checkout_pr,
+    clean_merged_prs,
     create_worktree,
     get_current_worktree,
+    get_pr_list,
     get_repo_root,
     list_worktrees,
     lock_worktree,
@@ -29,18 +34,14 @@ console = Console()
 
 def handle_error(e: Exception) -> int:
     """Handle and display errors consistently."""
-    if (
-        isinstance(e, WorktreeNotFoundError)
-        or isinstance(e, WorktreeExistsError)
-        or isinstance(e, WorktreeError)
-    ):
+    if isinstance(e, (WorktreeNotFoundError, WorktreeExistsError, WorktreeError)):
         console.print(f"[red]Error:[/red] {e}")
     else:
         console.print(f"[red]Unexpected error:[/red] {e}")
     return 1
 
 
-def format_worktree(wt: Worktree) -> dict:
+def format_worktree(wt: Worktree) -> dict[str, Any]:
     """Format a worktree for display."""
     status_parts = []
     if wt.is_main:
@@ -216,6 +217,99 @@ def root(ctx: click.Context) -> None:
         console.print(f"Repository root: {root_path}")
     except WorktreeError as e:
         ctx.exit(handle_error(e))
+
+
+@main.group()
+def pr() -> None:
+    """Manage worktrees for GitHub pull requests."""
+    pass
+
+
+@pr.command(name="list")
+@click.option(
+    "--state",
+    type=click.Choice(["open", "closed", "merged", "all"]),
+    default="open",
+    help="PR state filter",
+)
+@click.option("--limit", default=30, help="Maximum number of PRs to list")
+@click.option("--porcelain", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def pr_list(ctx: click.Context, state: str, limit: int, porcelain: bool) -> None:
+    """List pull requests for the repository."""
+    try:
+        prs = get_pr_list(state=state, limit=limit)
+    except (WorktreeError, GitHubError) as e:
+        ctx.exit(handle_error(e))
+
+    if porcelain:
+        for pr_item in prs:
+            parts = [str(pr_item.number), pr_item.title, pr_item.head_branch, pr_item.state]
+            if pr_item.is_draft:
+                parts.append("draft")
+            click.echo("\t".join(parts))
+        return
+
+    table = Table(title="GitHub Pull Requests", show_header=True, header_style="bold cyan")
+    table.add_column("#", style="bold")
+    table.add_column("Title", style="green")
+    table.add_column("Branch", style="blue")
+    table.add_column("State")
+    table.add_column("Draft")
+
+    for pr_item in prs:
+        draft_str = "✓" if pr_item.is_draft else ""
+        state_style = {"open": "green", "closed": "red", "merged": "purple"}.get(
+            pr_item.state, ""
+        )
+        if state_style:
+            state_display = f"[{state_style}]{pr_item.state}[/{state_style}]"
+        else:
+            state_display = pr_item.state
+        table.add_row(
+            str(pr_item.number),
+            pr_item.title,
+            pr_item.head_branch,
+            state_display,
+            draft_str,
+        )
+
+    console.print(table)
+
+
+@pr.command()
+@click.argument("number", type=int)
+@click.argument("path", type=click.Path(path_type=Path), required=False)
+@click.option("-b", "--base", help="Base commit/branch to create from")
+@click.pass_context
+def checkout(ctx: click.Context, number: int, path: Path | None, base: str | None) -> None:
+    """Create a worktree for a pull request."""
+    if path is None:
+        path = Path(f"pr-{number}")
+
+    try:
+        wt_path = checkout_pr(number, path, base=base)
+        console.print(f"[green]Created PR worktree:[/green] {wt_path.name} at {wt_path}")
+        console.print(f"  PR: #{number}")
+    except (WorktreeError, GitHubError) as e:
+        ctx.exit(handle_error(e))
+
+
+@pr.command()
+@click.pass_context
+def clean(ctx: click.Context) -> None:
+    """Remove worktrees for merged/closed pull requests."""
+    try:
+        removed = clean_merged_prs()
+    except (WorktreeError, GitHubError) as e:
+        ctx.exit(handle_error(e))
+
+    if removed:
+        console.print("[green]Removed PR worktrees:[/green]")
+        for p in removed:
+            console.print(f"  {p}")
+    else:
+        console.print("No merged/closed PR worktrees to clean.")
 
 
 if __name__ == "__main__":

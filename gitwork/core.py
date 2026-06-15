@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class WorktreeError(Exception):
 class GitError(WorktreeError):
     """Git command failed."""
 
-    def __init__(self, command: list[str], stderr: str, returncode: int):
+    def __init__(self, command: list[str], stderr: str, returncode: int) -> None:
         self.command = command
         self.stderr = stderr
         self.returncode = returncode
@@ -44,22 +45,89 @@ class GitError(WorktreeError):
 class WorktreeNotFoundError(WorktreeError):
     """Worktree not found."""
 
-    pass
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"Worktree not found: {path}")
+        self.path = path
 
 
 class WorktreeExistsError(WorktreeError):
     """Worktree already exists."""
 
-    pass
+    def __init__(self, branch: str) -> None:
+        super().__init__(f"Worktree or branch '{branch}' already exists")
+        self.branch = branch
+
+
+class GitNotFoundError(WorktreeError):
+    """Git executable not found in PATH."""
+
+    def __init__(self) -> None:
+        super().__init__("Git not found in PATH")
+
+
+class NotAGitRepositoryError(WorktreeError):
+    """Not a git repository."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Not a git repository: {stderr}")
+
+
+class ListWorktreesError(WorktreeError):
+    """Failed to list worktrees."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to list worktrees: {stderr}")
+
+
+class CreateWorktreeError(WorktreeError):
+    """Failed to create worktree."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to create worktree: {stderr}")
+
+
+class RemoveWorktreeError(WorktreeError):
+    """Failed to remove worktree."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to remove worktree: {stderr}")
+
+
+class LockWorktreeError(WorktreeError):
+    """Failed to lock worktree."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to lock worktree: {stderr}")
+
+
+class UnlockWorktreeError(WorktreeError):
+    """Failed to unlock worktree."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to unlock worktree: {stderr}")
+
+
+class PruneWorktreesError(WorktreeError):
+    """Failed to prune worktrees."""
+
+    def __init__(self, stderr: str) -> None:
+        super().__init__(f"Failed to prune worktrees: {stderr}")
+
+
+class CurrentWorktreeError(WorktreeError):
+    """Could not determine current worktree."""
+
+    def __init__(self) -> None:
+        super().__init__("Could not determine current worktree")
 
 
 def run_git_command(
     args: list[str],
     cwd: Path | None = None,
     capture: bool = True,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run a git command and return the result."""
-    cmd = ["git"] + args
+    cmd = ["git", *args]
     try:
         result = subprocess.run(
             cmd,
@@ -68,9 +136,10 @@ def run_git_command(
             text=True,
             check=False,
         )
-        return result
     except FileNotFoundError as e:
-        raise WorktreeError("Git not found in PATH") from e
+        raise GitNotFoundError() from e
+    else:
+        return result
 
 
 def get_repo_root(cwd: Path | None = None) -> Path:
@@ -81,7 +150,7 @@ def get_repo_root(cwd: Path | None = None) -> Path:
         # Try bare repo approach
         result = run_git_command(["rev-parse", "--git-dir"], cwd=cwd)
         if result.returncode != 0:
-            raise WorktreeError(f"Not a git repository: {result.stderr.strip()}")
+            raise NotAGitRepositoryError(result.stderr.strip())
         # For bare repo, the git dir is the repo root
         git_dir = Path(result.stdout.strip())
         if not git_dir.is_absolute():
@@ -96,6 +165,26 @@ def is_bare_repo(cwd: Path | None = None) -> bool:
     return result.stdout.strip() == "true"
 
 
+def _parse_worktree_line(line: str, current: dict[str, Any]) -> None:
+    """Parse a single line from git worktree list --porcelain output."""
+    if line.startswith("worktree "):
+        current["path"] = Path(line[9:])
+    elif line.startswith("HEAD "):
+        current["commit"] = line[5:]
+    elif line.startswith("branch "):
+        current["branch"] = line[7:]
+    elif line == "bare":
+        current["bare"] = True
+    elif line == "detached":
+        current["detached"] = True
+    elif line.startswith("locked"):
+        current["locked"] = True
+        if len(line) > len("locked "):
+            current["lock_reason"] = line[len("locked ") :]
+    elif line == "prunable":
+        current["prunable"] = True
+
+
 def list_worktrees(cwd: Path | None = None) -> list[Worktree]:
     """List all worktrees in the repository."""
     repo_root = get_repo_root(cwd)
@@ -104,10 +193,10 @@ def list_worktrees(cwd: Path | None = None) -> list[Worktree]:
     # Use porcelain format for consistent parsing
     result = run_git_command(["worktree", "list", "--porcelain"], cwd=repo_root)
     if result.returncode != 0:
-        raise WorktreeError(f"Failed to list worktrees: {result.stderr.strip()}")
+        raise ListWorktreesError(result.stderr.strip())
 
     worktrees = []
-    current = {}
+    current: dict[str, Any] = {}
     for line in result.stdout.strip().split("\n"):
         if not line:
             if current:
@@ -115,22 +204,7 @@ def list_worktrees(cwd: Path | None = None) -> list[Worktree]:
                 current = {}
             continue
 
-        if line.startswith("worktree "):
-            current["path"] = Path(line[9:])
-        elif line.startswith("HEAD "):
-            current["commit"] = line[5:]
-        elif line.startswith("branch "):
-            current["branch"] = line[7:]
-        elif line == "bare":
-            current["bare"] = True
-        elif line == "detached":
-            current["detached"] = True
-        elif line.startswith("locked"):
-            current["locked"] = True
-            if len(line) > 6:
-                current["lock_reason"] = line[8:]
-        elif line == "prunable":
-            current["prunable"] = True
+        _parse_worktree_line(line, current)
 
     if current:
         worktrees.append(_parse_worktree(current, repo_root, bare))
@@ -138,7 +212,7 @@ def list_worktrees(cwd: Path | None = None) -> list[Worktree]:
     return worktrees
 
 
-def _parse_worktree(data: dict, repo_root: Path, bare: bool) -> Worktree:
+def _parse_worktree(data: dict[str, Any], repo_root: Path, bare: bool) -> Worktree:
     """Parse worktree data from git worktree list output."""
     path = data.get("path", repo_root)
     commit = data.get("commit", "")
@@ -168,16 +242,10 @@ def _parse_worktree(data: dict, repo_root: Path, bare: bool) -> Worktree:
     )
 
 
-def create_worktree(
-    path: Path,
-    branch: str,
-    base: str | None = None,
-    force: bool = False,
-    cwd: Path | None = None,
-) -> Worktree:
-    """Create a new worktree."""
-    repo_root = get_repo_root(cwd)
-
+def _build_create_worktree_args(
+    path: Path, branch: str, base: str | None, force: bool
+) -> list[str]:
+    """Build git worktree add command arguments."""
     args = ["worktree", "add"]
     if force:
         args.append("--force")
@@ -191,15 +259,11 @@ def create_worktree(
         if force:
             # When forcing without base, attach to existing branch
             args.append(branch)
+    return args
 
-    result = run_git_command(args, cwd=repo_root)
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if "already exists" in stderr:
-            raise WorktreeExistsError(f"Worktree or branch '{branch}' already exists")
-        raise WorktreeError(f"Failed to create worktree: {stderr}")
 
-    # Get the created worktree info
+def _find_created_worktree(repo_root: Path, path: Path, branch: str) -> Worktree:
+    """Find the newly created worktree in the worktree list."""
     worktrees = list_worktrees(repo_root)
     # First try to find by path (most reliable)
     for wt in worktrees:
@@ -209,7 +273,6 @@ def create_worktree(
     for wt in worktrees:
         if wt.branch == branch:
             return wt
-
     # Fallback
     return Worktree(
         path=path.resolve(),
@@ -217,6 +280,29 @@ def create_worktree(
         commit="",
         is_main=False,
     )
+
+
+def create_worktree(
+    path: Path,
+    branch: str,
+    base: str | None = None,
+    force: bool = False,
+    cwd: Path | None = None,
+) -> Worktree:
+    """Create a new worktree."""
+    repo_root = get_repo_root(cwd)
+
+    args = _build_create_worktree_args(path, branch, base, force)
+
+    result = run_git_command(args, cwd=repo_root)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "already exists" in stderr:
+            raise WorktreeExistsError(branch)
+        raise CreateWorktreeError(stderr)
+
+    # Get the created worktree info
+    return _find_created_worktree(repo_root, path, branch)
 
 
 def remove_worktree(
@@ -235,9 +321,13 @@ def remove_worktree(
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if "not found" in stderr or "no such worktree" in stderr or "not a working tree" in stderr:
-            raise WorktreeNotFoundError(f"Worktree not found: {path}")
-        raise WorktreeError(f"Failed to remove worktree: {stderr}")
+        if (
+            "not found" in stderr
+            or "no such worktree" in stderr
+            or "not a working tree" in stderr
+        ):
+            raise WorktreeNotFoundError(path)
+        raise RemoveWorktreeError(stderr)
 
 
 def lock_worktree(path: Path, reason: str | None = None, cwd: Path | None = None) -> None:
@@ -251,7 +341,7 @@ def lock_worktree(path: Path, reason: str | None = None, cwd: Path | None = None
 
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
-        raise WorktreeError(f"Failed to lock worktree: {result.stderr.strip()}")
+        raise LockWorktreeError(result.stderr.strip())
 
 
 def unlock_worktree(path: Path, cwd: Path | None = None) -> None:
@@ -260,7 +350,7 @@ def unlock_worktree(path: Path, cwd: Path | None = None) -> None:
 
     result = run_git_command(["worktree", "unlock", str(path)], cwd=repo_root)
     if result.returncode != 0:
-        raise WorktreeError(f"Failed to unlock worktree: {result.stderr.strip()}")
+        raise UnlockWorktreeError(result.stderr.strip())
 
 
 def prune_worktrees(cwd: Path | None = None, dry_run: bool = False) -> list[Path]:
@@ -275,7 +365,7 @@ def prune_worktrees(cwd: Path | None = None, dry_run: bool = False) -> list[Path
 
     result = run_git_command(args, cwd=repo_root)
     if result.returncode != 0:
-        raise WorktreeError(f"Failed to prune worktrees: {result.stderr.strip()}")
+        raise PruneWorktreesError(result.stderr.strip())
 
     # Parse output for pruned paths
     pruned = []
@@ -298,13 +388,14 @@ def get_current_worktree(cwd: Path | None = None) -> Worktree:
     for wt in worktrees:
         try:
             current_dir.relative_to(wt.path)
-            return wt
         except ValueError:
             continue
+        else:
+            return wt
 
     # Fallback to main worktree
     for wt in worktrees:
         if wt.is_main:
             return wt
 
-    raise WorktreeNotFoundError("Could not determine current worktree")
+    raise CurrentWorktreeError()

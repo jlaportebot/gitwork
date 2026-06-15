@@ -113,6 +113,7 @@ def test_main_entry_point() -> None:
         [sys.executable, "-m", "gitwork", "--help"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0
     assert "gitwork" in result.stdout.lower()
