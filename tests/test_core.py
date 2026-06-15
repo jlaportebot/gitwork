@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,9 @@ from gitwork.core import (
     run_git_command,
     unlock_worktree,
 )
+
+GIT_ERROR_RETURNCODE = 128
+EXPECTED_WORKTREES_AFTER_CREATE = 2
 
 
 class TestRunGitCommand:
@@ -65,9 +69,11 @@ class TestRunGitCommand:
 
     def test_run_git_command_git_not_found(self, tmp_path: Path) -> None:
         """Test error when git is not found."""
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
-            with pytest.raises(WorktreeError, match="Git not found in PATH"):
-                run_git_command(["status"], cwd=tmp_path)
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError()),
+            pytest.raises(WorktreeError, match="Git not found in PATH"),
+        ):
+            run_git_command(["status"], cwd=tmp_path)
 
 
 class TestGetRepoRoot:
@@ -116,7 +122,7 @@ class TestListWorktrees:
         wt = worktrees[0]
         assert wt.is_main
         assert not wt.is_bare
-        assert wt.branch == "master" or wt.branch == "main"
+        assert wt.branch in {"master", "main"}
 
     def test_list_worktrees_with_additional(self, git_repo_with_branch: Path) -> None:
         """Test listing worktrees after creating additional worktree."""
@@ -125,7 +131,7 @@ class TestListWorktrees:
         create_worktree(wt_path, "another-branch", cwd=git_repo_with_branch)
 
         worktrees = list_worktrees(git_repo_with_branch)
-        assert len(worktrees) == 2
+        assert len(worktrees) == EXPECTED_WORKTREES_AFTER_CREATE
 
         # Find the new worktree
         new_wt = next(w for w in worktrees if w.path == wt_path.resolve())
@@ -158,7 +164,7 @@ class TestCreateWorktree:
 
         # Verify worktree exists
         worktrees = list_worktrees(git_repo)
-        assert len(worktrees) == 2
+        assert len(worktrees) == EXPECTED_WORKTREES_AFTER_CREATE
 
     def test_create_worktree_from_base(self, git_repo: Path, tmp_path: Path) -> None:
         """Test creating worktree from specific base commit."""
@@ -271,7 +277,6 @@ class TestPruneWorktrees:
         wt_path = tmp_path / "wt_prune"
         create_worktree(wt_path, "prune-branch", cwd=git_repo)
         # Remove the worktree directory but not the admin files
-        import shutil
 
         shutil.rmtree(wt_path)
 
@@ -283,7 +288,6 @@ class TestPruneWorktrees:
         """Test actual prune."""
         wt_path = tmp_path / "wt_prune2"
         create_worktree(wt_path, "prune-branch2", cwd=git_repo)
-        import shutil
 
         shutil.rmtree(wt_path)
 
@@ -347,19 +351,19 @@ class TestExceptions:
 
     def test_git_error(self) -> None:
         """Test GitError with command details."""
-        err = GitError(["git", "status"], "fatal: not a repo", 128)
+        err = GitError(["git", "status"], "fatal: not a repo", GIT_ERROR_RETURNCODE)
         assert "git status" in str(err)
         assert "fatal: not a repo" in str(err)
         assert err.command == ["git", "status"]
         assert err.stderr == "fatal: not a repo"
-        assert err.returncode == 128
+        assert err.returncode == GIT_ERROR_RETURNCODE
 
     def test_worktree_not_found_error(self) -> None:
         """Test WorktreeNotFoundError."""
-        err = WorktreeNotFoundError("worktree not found")
-        assert str(err) == "worktree not found"
+        err = WorktreeNotFoundError(Path("worktree/not/found"))
+        assert str(err) == "Worktree not found: worktree/not/found"
 
     def test_worktree_exists_error(self) -> None:
         """Test WorktreeExistsError."""
-        err = WorktreeExistsError("worktree exists")
-        assert str(err) == "worktree exists"
+        err = WorktreeExistsError("feature-branch")
+        assert str(err) == "Worktree or branch 'feature-branch' already exists"
