@@ -50,11 +50,13 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=gitwork --cov-report=term-missing --cov-fail-under=50"
+addopts = "-v --cov=gitwork --cov-report=term-missing --cov-fail-under=70"
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
 select = [
     "E", "F", "I", "UP", "W", "C4", "C90", "PL", "PTH", "RUF", "SIM", "T20", "TRY"
 ]
