@@ -22,10 +22,12 @@ from gitwork import (
     get_current_worktree,
     get_pr_list,
     get_repo_root,
+    get_worktree_status,
     list_worktrees,
     lock_worktree,
     prune_worktrees,
     remove_worktree,
+    sync_worktree,
     unlock_worktree,
 )
 
@@ -313,6 +315,81 @@ def clean(ctx: click.Context) -> None:
             console.print(f"  {p}")
     else:
         console.print("No merged/closed PR worktrees to clean.")
+
+
+@main.command()
+@click.option("--porcelain", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def status(ctx: click.Context, porcelain: bool) -> None:
+    """Show worktree status (ahead/behind upstream, uncommitted changes)."""
+    try:
+        wt_status = get_worktree_status()
+    except WorktreeError as e:
+        ctx.exit(handle_error(e))
+
+    if porcelain:
+        # Format: branch commit ahead behind upstream has_uncommitted
+        upstream = wt_status.upstream_branch or "none"
+        uncommitted = "1" if wt_status.has_uncommitted else "0"
+        click.echo(
+            f"{wt_status.branch} {wt_status.commit} "
+            f"{wt_status.ahead} {wt_status.behind} {upstream} {uncommitted}"
+        )
+        return
+
+    table = Table(title="Worktree Status", show_header=True, header_style="bold cyan")
+    table.add_column("Property", style="bold")
+    table.add_column("Value")
+
+    table.add_row("Branch", wt_status.branch)
+    table.add_row("Commit", wt_status.commit)
+
+    # Ahead/behind
+    if wt_status.upstream_branch:
+        ahead_str = f"[green]+{wt_status.ahead}[/green]" if wt_status.ahead > 0 else "0"
+        behind_str = f"[red]-{wt_status.behind}[/red]" if wt_status.behind > 0 else "0"
+        table.add_row("Upstream", wt_status.upstream_branch)
+        table.add_row("Ahead/Behind", f"{ahead_str} / {behind_str}")
+    else:
+        table.add_row("Upstream", "[dim]none (no upstream configured)[/dim]")
+        table.add_row("Ahead/Behind", "N/A")
+
+    # Uncommitted changes
+    if wt_status.has_uncommitted:
+        table.add_row("Uncommitted", "[yellow]Yes[/yellow]")
+    else:
+        table.add_row("Uncommitted", "[green]No[/green]")
+
+    # Overall status
+    if wt_status.is_dirty:
+        table.add_row("Status", "[yellow]Dirty[/yellow]")
+    else:
+        table.add_row("Status", "[green]Clean[/green]")
+
+    console.print(table)
+
+
+@main.command()
+@click.option(
+    "--strategy",
+    type=click.Choice(["merge", "rebase"]),
+    default="merge",
+    help="Sync strategy: merge (default) or rebase",
+)
+@click.option("--remote", default="origin", help="Remote to fetch from")
+@click.pass_context
+def sync(ctx: click.Context, strategy: str, remote: str) -> None:
+    """Sync worktree with upstream branch."""
+    try:
+        success, message = sync_worktree(strategy=strategy, remote=remote)
+    except WorktreeError as e:
+        ctx.exit(handle_error(e))
+
+    if success:
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"[red]{message}[/red]")
+        ctx.exit(1)
 
 
 if __name__ == "__main__":

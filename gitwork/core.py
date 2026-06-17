@@ -395,3 +395,191 @@ def get_current_worktree(cwd: Path | None = None) -> Worktree:
             return wt
 
     raise CurrentWorktreeError()
+
+
+@dataclass(frozen=True)
+class WorktreeStatus:
+    """Status information for a worktree."""
+
+    branch: str
+    commit: str
+    ahead: int
+    behind: int
+    upstream_branch: str | None
+    has_uncommitted: bool
+    is_dirty: bool
+
+
+def _get_upstream_branch(cwd: Path) -> str | None:
+    """Get the upstream branch for the current branch."""
+    result = run_git_command(
+        ["rev-parse", "--abbrev-ref", "@{u}"],
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+EXPECTED_REV_LIST_PARTS = 2
+
+
+def _get_ahead_behind(cwd: Path, upstream: str) -> tuple[int, int]:
+    """Get commits ahead and behind upstream."""
+    result = run_git_command(
+        ["rev-list", "--left-right", "--count", f"{upstream}...HEAD"],
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        return (0, 0)
+    parts = result.stdout.strip().split("\t")
+    if len(parts) != EXPECTED_REV_LIST_PARTS:
+        return (0, 0)
+    behind = int(parts[0])
+    ahead = int(parts[1])
+    return (ahead, behind)
+
+
+def _has_uncommitted_changes(cwd: Path) -> bool:
+    """Check if there are uncommitted changes."""
+    result = run_git_command(["status", "--porcelain"], cwd=cwd)
+    return bool(result.stdout.strip())
+
+
+def get_worktree_status(cwd: Path | None = None) -> WorktreeStatus:
+    """Get status information for a worktree."""
+    repo_root = get_repo_root(cwd)
+    worktrees = list_worktrees(repo_root)
+
+    current_dir = Path(cwd or ".").resolve()
+    current_wt = None
+    for wt in worktrees:
+        try:
+            current_dir.relative_to(wt.path)
+        except ValueError:
+            continue
+        else:
+            current_wt = wt
+            break
+
+    if current_wt is None:
+        # Fallback to main worktree
+        for wt in worktrees:
+            if wt.is_main:
+                current_wt = wt
+                break
+
+    if current_wt is None:
+        raise CurrentWorktreeError()
+
+    wt_path = current_wt.path
+    upstream = _get_upstream_branch(wt_path)
+    ahead, behind = (0, 0)
+    if upstream:
+        ahead, behind = _get_ahead_behind(wt_path, upstream)
+
+    has_uncommitted = _has_uncommitted_changes(wt_path)
+
+    return WorktreeStatus(
+        branch=current_wt.branch,
+        commit=current_wt.commit[:8] if current_wt.commit else "",
+        ahead=ahead,
+        behind=behind,
+        upstream_branch=upstream,
+        has_uncommitted=has_uncommitted,
+        is_dirty=has_uncommitted or ahead > 0 or behind > 0,
+    )
+
+
+def _get_current_worktree_for_sync(cwd: Path | None = None) -> Worktree:
+    """Get the current worktree for sync operations."""
+    repo_root = get_repo_root(cwd)
+    worktrees = list_worktrees(repo_root)
+
+    current_dir = Path(cwd or ".").resolve()
+    current_wt = None
+    for wt in worktrees:
+        try:
+            current_dir.relative_to(wt.path)
+        except ValueError:
+            continue
+        else:
+            current_wt = wt
+            break
+
+    if current_wt is None:
+        for wt in worktrees:
+            if wt.is_main:
+                current_wt = wt
+                break
+
+    if current_wt is None:
+        raise CurrentWorktreeError()
+
+    return current_wt
+
+
+def _sync_with_upstream(wt_path: Path, upstream: str, strategy: str) -> tuple[bool, str]:
+    """Sync worktree with upstream branch."""
+    # Get current commit before sync
+    before_result = run_git_command(["rev-parse", "HEAD"], cwd=wt_path)
+    before_commit = before_result.stdout.strip()[:8]
+
+    # Sync with upstream
+    if strategy == "rebase":
+        sync_result = run_git_command(["rebase", upstream], cwd=wt_path)
+    else:
+        sync_result = run_git_command(["merge", "--ff-only", upstream], cwd=wt_path)
+        if sync_result.returncode != 0:
+            # Try merge with commit if fast-forward fails
+            sync_result = run_git_command(["merge", upstream], cwd=wt_path)
+
+    if sync_result.returncode != 0:
+        return (False, f"Sync failed: {sync_result.stderr.strip()}")
+
+    # Get commit after sync
+    after_result = run_git_command(["rev-parse", "HEAD"], cwd=wt_path)
+    after_commit = after_result.stdout.strip()[:8]
+
+    if before_commit == after_commit:
+        return (True, f"Already up to date with {upstream}")
+    else:
+        return (True, f"Synced {before_commit}..{after_commit} from {upstream}")
+
+
+def sync_worktree(
+    cwd: Path | None = None,
+    strategy: str = "merge",
+    remote: str = "origin",
+) -> tuple[bool, str]:
+    """Sync worktree with upstream branch.
+
+    Args:
+        cwd: Working directory (defaults to current)
+        strategy: "merge" or "rebase"
+        remote: Remote name to fetch from
+
+    Returns:
+        Tuple of (success, message)
+    """
+    current_wt = _get_current_worktree_for_sync(cwd)
+    wt_path = current_wt.path
+
+    # Check for uncommitted changes
+    if _has_uncommitted_changes(wt_path):
+        return (
+            False,
+            "Cannot sync: worktree has uncommitted changes. Commit or stash first.",
+        )
+
+    # Check for upstream branch first
+    upstream = _get_upstream_branch(wt_path)
+    if not upstream:
+        return (False, "No upstream branch configured for current branch")
+
+    # Fetch from remote
+    fetch_result = run_git_command(["fetch", remote], cwd=wt_path)
+    if fetch_result.returncode != 0:
+        return (False, f"Fetch failed: {fetch_result.stderr.strip()}")
+
+    return _sync_with_upstream(wt_path, upstream, strategy)

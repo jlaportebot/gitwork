@@ -18,12 +18,14 @@ from gitwork.core import (
     create_worktree,
     get_current_worktree,
     get_repo_root,
+    get_worktree_status,
     is_bare_repo,
     list_worktrees,
     lock_worktree,
     prune_worktrees,
     remove_worktree,
     run_git_command,
+    sync_worktree,
     unlock_worktree,
 )
 
@@ -367,3 +369,86 @@ class TestExceptions:
         """Test WorktreeExistsError."""
         err = WorktreeExistsError("feature-branch")
         assert str(err) == "Worktree or branch 'feature-branch' already exists"
+
+
+class TestWorktreeStatus:
+    """Tests for get_worktree_status function."""
+
+    def test_get_worktree_status_clean(self, git_repo: Path, tmp_path: Path) -> None:
+        """Test status for clean worktree with no upstream."""
+        status = get_worktree_status(git_repo)
+        assert status.branch in {"master", "main"}
+        assert status.commit
+        assert status.ahead == 0
+        assert status.behind == 0
+        assert status.upstream_branch is None
+        assert status.has_uncommitted is False
+        assert status.is_dirty is False
+
+    def test_get_worktree_status_with_uncommitted(self, git_repo: Path, tmp_path: Path) -> None:
+        """Test status detects uncommitted changes."""
+        (git_repo / "new_file.txt").write_text("uncommitted")
+        status = get_worktree_status(git_repo)
+        assert status.has_uncommitted is True
+        assert status.is_dirty is True
+
+    def test_get_worktree_status_with_upstream(self, git_repo: Path, tmp_path: Path) -> None:
+        """Test status with upstream branch configured."""
+        # Create a remote-like setup
+        remote_path = tmp_path / "remote_repo"
+        remote_path.mkdir()
+        subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True, capture_output=True)
+
+        # Add remote and push
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(remote_path)],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", "HEAD"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+
+        status = get_worktree_status(git_repo)
+        assert status.upstream_branch is not None
+        assert "origin/" in status.upstream_branch
+
+
+class TestSyncWorktree:
+    """Tests for sync_worktree function."""
+
+    def test_sync_worktree_no_upstream(self, git_repo: Path, tmp_path: Path) -> None:
+        """Test sync fails when no upstream configured."""
+        success, message = sync_worktree(cwd=git_repo)
+        assert success is False
+        assert "No upstream branch configured" in message
+
+    def test_sync_worktree_with_uncommitted(self, git_repo: Path, tmp_path: Path) -> None:
+        """Test sync fails with uncommitted changes."""
+        # Create a remote
+        remote_path = tmp_path / "remote_repo"
+        remote_path.mkdir()
+        subprocess.run(["git", "init", "--bare"], cwd=remote_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(remote_path)],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", "HEAD"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+
+        # Add uncommitted change
+        (git_repo / "uncommitted.txt").write_text("uncommitted")
+
+        success, message = sync_worktree(cwd=git_repo)
+        assert success is False
+        assert "uncommitted changes" in message
